@@ -554,7 +554,10 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
     const texto = $("nvTexto").value.trim(), a = num($("nvInicio").value), b = num($("nvFin").value);
     if (!texto || !isFinite(a) || !isFinite(b)) return aviso("Escribe el texto, el inicio y el fin de la nueva palabra.", true);
     if (b - a < MIN_DUR) return aviso("El fin debe ser mayor que el inicio.", true);
-    const p = nuevaPalabra(texto, Math.max(0, a), Math.min(dur() || b, b));
+    const xmin = Math.max(0, a);
+    const xmax = duracion > 0 ? Math.min(duracion, b) : b;
+    if (xmax - xmin < MIN_DUR) return aviso(`El fin no puede superar la duración del audio (${duracion.toFixed(3)} s).`, true);
+    const p = nuevaPalabra(texto, xmin, xmax);
     asignarCarriles(); selId = p.id; dibujarTodo(); actualizarSelector();
     $("formNueva").reset();
     aviso(`"${texto}" añadida. Si reemplaza una parte de otra fila, recorta o quita esa fila.`);
