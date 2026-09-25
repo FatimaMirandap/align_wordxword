@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ajustador de alineación palabra por palabra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --piedra: #E6EBE8;
+  --papel: #F7F9F8;
+  --tinta: #1C2B2E;
+  --tinta-suave: #52666A;
+  --jade: #2F7A68;
+  --jade-claro: #CFE5DD;
+  --cenote: #1E5C85;
+  --grana: #A8324A;
+  --linea: #C4CFCB;
+  --onda: #2F7A68;
+  --region: rgba(30, 92, 133, 0.16);
+  --region-borde: #1E5C85;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --piedra: #142124; --papel: #1B2B2F; --tinta: #E4ECE9; --tinta-suave: #9DB2AD;
+    --jade: #5FB59D; --jade-claro: #214239; --cenote: #6FA8D1; --grana: #E0708A;
+    --linea: #33474B; --onda: #5FB59D; --region: rgba(111, 168, 209, 0.18); --region-borde: #6FA8D1;
+  }
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  margin: 0; background: var(--piedra); color: var(--tinta);
+  font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  font-size: 16px; line-height: 1.5; font-variant-numeric: tabular-nums;
+}
+main { max-width: 1200px; margin: 0 auto; padding: 24px 20px 64px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 24px; margin-bottom: 20px; }
+h1 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 1.9rem; line-height: 1.15; margin: 0; }
+header p { margin: 0; color: var(--tinta-suave); max-width: 60ch; }
+.panel { background: var(--papel); border: 1px solid var(--linea); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+.carga { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: end; }
+label { display: block; font-weight: 700; font-size: 0.9rem; margin-bottom: 4px; }
+input[type="file"], input[type="text"], input[type="number"], select {
+  width: 100%; font: inherit; color: inherit; background: var(--piedra);
+  border: 1px solid var(--linea); border-radius: 4px; padding: 6px 8px;
+}
+button {
+  font: inherit; font-weight: 700; color: var(--papel); background: var(--jade);
+  border: 0; border-radius: 4px; padding: 7px 14px; cursor: pointer;
+}
+button.sec { background: transparent; color: var(--tinta); border: 1px solid var(--linea); font-weight: 400; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+:focus-visible { outline: 3px solid var(--cenote); outline-offset: 2px; }
+.fila { display: flex; gap: 8px; }
+.fila input { flex: 1; }
+.estado { margin: 10px 0 0; color: var(--tinta-suave); min-height: 1.5em; }
+.estado.error { color: var(--grana); }
+
+.barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.barra .tiempo { margin-left: auto; font-weight: 700; }
+.zoom { display: flex; align-items: center; gap: 6px; }
+.zoom input { width: 140px; }
+
+.lienzo { position: relative; overflow-x: auto; overflow-y: hidden; border: 1px solid var(--linea); border-radius: 4px; background: var(--piedra); }
+.linea-tiempo { position: relative; }
+canvas { display: block; }
+#onda { cursor: text; }
+.pista { position: relative; border-top: 1px solid var(--linea); }
+.region {
+  position: absolute; height: 34px; background: var(--region);
+  border: 1px solid var(--region-borde); border-radius: 3px; cursor: grab;
+  font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 6px 8px 0; user-select: none; touch-action: none;
+}
+.region.sel { box-shadow: 0 0 0 2px var(--tinta); }
+.region.objetivo { background: rgba(168, 50, 74, 0.14); border: 2px solid var(--grana); font-weight: 700; }
+.region .asa { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.region .asa.i { left: 0; } .region .asa.d { right: 0; }
+.marco { position: absolute; top: 0; border-left: 2px solid var(--grana); border-right: 2px solid var(--grana); background: rgba(168, 50, 74, 0.08); pointer-events: none; }
+.cabezal { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tinta); pointer-events: none; }
+.vacio { padding: 48px 16px; text-align: center; color: var(--tinta-suave); }
+
+.tabla-envoltura { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--linea); }
+th { font-size: 0.85rem; color: var(--tinta-suave); }
+td input[type="text"] { min-width: 120px; }
+td input[type="number"] { width: 100px; }
+tr.sel td { background: var(--jade-claro); }
+tr.objetivo td:first-child { box-shadow: inset 4px 0 0 var(--grana); }
+.nueva { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; align-items: end; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--linea); }
+@media (max-width: 640px) { .nueva { grid-template-columns: 1fr 1fr; } }
+.acciones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.ayuda { color: var(--tinta-suave); font-size: 0.9rem; margin: 10px 0 0; }
+kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; }
+@media (max-width: 640px) { h1 { font-size: 1.5rem; } .barra .tiempo { margin-left: 0; width: 100%; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Ajustador de alineación</h1>
+    <p>Corrige dónde empieza y termina cada palabra escuchando el audio. Cada palabra se mueve sola: ajustar una no desplaza a sus vecinas.</p>
+  </header>
+
+  <section class="panel" aria-label="Archivos">
+    <div class="carga">
+      <div>
+        <label for="inAudio">Audio de la oración</label>
+        <input id="inAudio" type="file" accept="audio/*,video/mp4,.wav,.mp3,.mp4,.m4a">
+      </div>
+      <div>
+        <label for="inCsv">CSV de palabras alineadas</label>
+        <input id="inCsv" type="file" accept=".csv,text/csv">
+      </div>
+      <div id="cajaArchivo" hidden>
+        <label for="selArchivo">Oración del CSV</label>
+        <select id="selArchivo"></select>
+      </div>
+      <div>
+        <label for="inObjetivo">Palabra objetivo</label>
+        <div class="fila">
+          <input id="inObjetivo" type="text" placeholder="p. ej. je'elo'">
+          <button id="btnObjetivo" type="button">Enmarcar</button>
+        </div>
+      </div>
+    </div>
+    <p id="estado" class="estado" role="status">Carga un audio y el CSV con sus palabras para empezar.</p>
+  </section>
+
+  <section class="panel" aria-label="Editor">
+    <div class="barra">
+      <button id="btnPlay" type="button" disabled>Reproducir</button>
+      <button id="btnPlaySel" type="button" class="sec" disabled>Escuchar palabra</button>
+      <button id="btnPlayObj" type="button" class="sec" disabled>Escuchar objetivo</button>
+      <button id="btnDividir" type="button" class="sec" disabled>Dividir en el cabezal</button>
+      <div class="zoom">
+        <label for="inZoom" style="margin:0">Zoom</label>
+        <input id="inZoom" type="range" min="40" max="800" value="200">
+      </div>
+      <span class="tiempo" id="tiempo">0.000 s</span>
+    </div>
+    <div class="lienzo" id="lienzo">
+      <div class="linea-tiempo" id="lineaTiempo">
+        <canvas id="regla" height="22"></canvas>
+        <canvas id="onda" height="120"></canvas>
+        <div class="pista" id="pista"></div>
+        <div class="marco" id="marco" hidden></div>
+        <div class="cabezal" id="cabezal" hidden></div>
+      </div>
+      <div class="vacio" id="vacio">La forma de onda aparecerá aquí.</div>
+    </div>
+    <p class="ayuda">
+      Arrastra una palabra para moverla y sus bordes para ajustar inicio y fin. Doble clic la reproduce.
+      Si una fila tiene dos palabras juntas, coloca el cabezal entre ellas y usa <em>Dividir en el cabezal</em>, o añade la palabra con el formulario de abajo.
+      <kbd>Espacio</kbd> reproduce o pausa, <kbd>Enter</kbd> escucha la palabra seleccionada,
+      <kbd>←</kbd> <kbd>→</kbd> mueven la palabra 10 ms, con <kbd>Shift</kbd> ajustan el inicio y con <kbd>Alt</kbd> el final.
+    </p>
+  </section>
+
+  <section class="panel" aria-label="Palabras">
+    <div class="tabla-envoltura">
+      <table>
+        <thead><tr><th>Objetivo</th><th>Texto</th><th>Inicio (s)</th><th>Fin (s)</th><th>Duración</th><th></th></tr></thead>
+        <tbody id="cuerpo"></tbody>
+      </table>
+    </div>
+    <form id="formNueva" class="nueva" autocomplete="off">
+      <div><label for="nvTexto">Texto de la nueva palabra</label><input id="nvTexto" type="text" required placeholder="p. ej. chéen"></div>
+      <div><label for="nvInicio">Inicio (s)</label><input id="nvInicio" type="number" step="0.001" min="0" required></div>
+      <div><label for="nvFin">Fin (s)</label><input id="nvFin" type="number" step="0.001" min="0" required></div>
+      <div class="fila"><button id="btnUsarCabezal" type="button" class="sec" disabled>Usar cabezal</button><button id="btnNueva" type="submit" disabled>Añadir palabra</button></div>
+    </form>
+    <div class="acciones">
+      <button id="btnExportar" type="button" disabled>Descargar esta oración</button>
+      <button id="btnExportarTodo" type="button" class="sec" disabled>Descargar todas las oraciones</button>
+      <button id="btnExportarObj" type="button" class="sec" disabled>Descargar solo palabras objetivo</button>
+    </div>
+  </section>
+</main>
+
+<audio id="audio" preload="auto"></audio>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const audio = $("audio");
+  const estado = $("estado");
+  const ALTO_REGION = 40;
+  const MIN_DUR = 0.01;
+
+  let filas = [];          // todas las filas del CSV
+  let archivoActual = null;
+  let nombreCsv = "palabras";
+  let muestras = null;     // Float32Array mono
+  let duracion = 0;
+  let pps = 200;           // píxeles por segundo
+  let selId = null;
+  let detenerEn = null;
+  let siguienteId = 1;
+  let audioBase = null;
+  const eliminadas = new Set(); // oraciones donde se quitó alguna palabra
+
+  // ---------- utilidades ----------
+  const r3 = (x) => Math.round(x * 1000) / 1000;
+  const normalizar = (t) => String(t || "").normalize("NFC").toLowerCase().replace(/[’‘´`ʼ′]/g, "'").trim();
+  const num = (v) => parseFloat(String(v ?? "").trim().replace(",", "."));
+  const baseNombre = (n) => String(n || "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
+  const palabras = () => filas.filter((f) => f.archivo === archivoActual);
+  const porId = (id) => filas.find((f) => f.id === id);
+  function aviso(msg, error = false) { estado.textContent = msg; estado.classList.toggle("error", error); }
+
+  function parsearCSV(texto) {
+    texto = texto.replace(/^\uFEFF/, "");
+    const filasCsv = []; let fila = []; let campo = ""; let comillas = false;
+    for (let i = 0; i < texto.length; i++) {
+      const c = texto[i];
+      if (comillas) {
+        if (c === '"' && texto[i + 1] === '"') { campo += '"'; i++; }
+        else if (c === '"') comillas = false;
+        else campo += c;
+      } else if (c === '"') comillas = true;
+      else if (c === ",") { fila.push(campo); campo = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && texto[i + 1] === "\n") i++;
+        fila.push(campo); campo = "";
+        if (fila.some((v) => v !== "")) filasCsv.push(fila);
+        fila = [];
+      } else campo += c;
+    }
+    fila.push(campo);
+    if (fila.some((v) => v !== "")) filasCsv.push(fila);
+    return filasCsv;
+  }
+
+  function csvCampo(v) {
+    const s = String(v ?? "");
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  // ---------- carga ----------
+  $("inCsv").addEventListener("change", async (e) => {
+    const archivo = e.target.files[0]; if (!archivo) return;
+    nombreCsv = baseNombre(archivo.name);
+    const datos = parsearCSV(await archivo.text());
+    if (datos.length < 2) return aviso("El CSV está vacío o solo tiene encabezados.", true);
+    const enc = datos[0].map((h) => normalizar(h).normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+    const col = (n) => enc.indexOf(n);
+    const [cA, cI, cF, cT, cO] = [col("archivo"), col("xmin"), col("xmax"), col("texto"), col("objetivo")];
+    if (cI < 0 || cF < 0 || cT < 0) return aviso("El CSV debe tener las columnas xmin, xmax y texto (archivo y duracion son opcionales).", true);
+    filas = datos.slice(1).map((d) => ({
+      id: siguienteId++,
+      archivo: cA >= 0 ? d[cA] : (audioBase || "audio"),
+      xmin: num(d[cI]), xmax: num(d[cF]), texto: d[cT] ?? "",
+      objetivo: cO >= 0 && /^(1|true|si|sí)$/i.test(String(d[cO]).trim()),
+      modificado: false, carril: 0,
+    })).filter((f) => isFinite(f.xmin) && isFinite(f.xmax));
+    const archivos = [...new Set(filas.map((f) => f.archivo))];
+    const sel = $("selArchivo"); sel.innerHTML = "";
+    archivos.forEach((a) => sel.add(new Option(a, a)));
+    actualizarSelector();
+    $("cajaArchivo").hidden = archivos.length < 2;
+    elegirArchivo(audioBase && archivos.includes(audioBase) ? audioBase : archivos[0]);
+    aviso(`${filas.length} palabras cargadas de ${archivos.length} oración(es).` + (duracion ? "" : " Falta el audio."));
+  });
+
+  $("selArchivo").addEventListener("change", (e) => elegirArchivo(e.target.value));
+
+  function actualizarSelector() {
+    [...$("selArchivo").options].forEach((o) => {
+      const del = filas.filter((f) => f.archivo === o.value);
+      o.textContent = `${del.some((f) => f.modificado) || eliminadas.has(o.value) ? "✎ " : ""}${o.value} (${del.length} palabras)`;
+    });
+  }
+
+  function elegirArchivo(a) {
+    archivoActual = a; $("selArchivo").value = a; selId = null;
+    if (audioBase && a !== audioBase) aviso(`Ojo: el audio cargado (${audioBase}) no coincide con la oración elegida (${a}).`, true);
+    asignarCarriles(); dibujarTodo();
+  }
+
+  $("inAudio").addEventListener("change", async (e) => {
+    const archivo = e.target.files[0]; if (!archivo) return;
+    audioBase = baseNombre(archivo.name);
+    audio.src = URL.createObjectURL(archivo);
+    aviso("Decodificando audio…");
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = await ctx.decodeAudioData(await archivo.arrayBuffer());
+      duracion = buf.duration;
+      muestras = new Float32Array(buf.length);
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        const d = buf.getChannelData(c);
+        for (let i = 0; i < d.length; i++) muestras[i] += d[i] / buf.numberOfChannels;
+      }
+      ctx.close();
+      aviso(`Audio listo: ${duracion.toFixed(2)} s.` + (filas.length ? "" : " Ahora carga el CSV."));
+    } catch (err) {
+      muestras = null;
+      await new Promise((ok) => { audio.onloadedmetadata = ok; audio.onerror = ok; });
+      duracion = isFinite(audio.duration) ? audio.duration : 0;
+      aviso(duracion ? "El navegador reproduce el audio pero no pudo dibujar su forma de onda. Aún puedes ajustar las palabras de oído."
+                     : "El navegador no pudo abrir este audio. Prueba con WAV o MP3.", !duracion);
+    }
+    const nombres = [...new Set(filas.map((f) => f.archivo))];
+    if (nombres.includes(audioBase)) elegirArchivo(audioBase); else dibujarTodo();
+    ["btnPlay", "btnUsarCabezal"].forEach((b) => ($(b).disabled = !duracion));
+  });
+
+  // ---------- carriles (para que las palabras que se traslapan no se tapen) ----------
+  function asignarCarriles() {
+    const fin = [];
+    [...palabras()].sort((a, b) => a.xmin - b.xmin).forEach((p) => {
+      let c = fin.findIndex((x) => x <= p.xmin + 1e-6);
+      if (c < 0) { c = fin.length; fin.push(0); }
+      p.carril = c; fin[c] = p.xmax;
+    });
+  }
+
+  // ---------- dibujo ----------
+  const dur = () => Math.max(duracion, ...palabras().map((p) => p.xmax), 0.001);
+
+  function dibujarTodo() {
+    const hay = duracion > 0 || palabras().length > 0;
+    $("vacio").hidden = hay; $("lineaTiempo").hidden = !hay;
+    if (!hay) return;
+    const dpr = window.devicePixelRatio || 1;
+    pps = Math.min(+$("inZoom").value, 30000 / dpr / dur());
+    const ancho = Math.ceil(dur() * pps);
+    $("lineaTiempo").style.width = ancho + "px";
+    dibujarRegla(ancho, dpr); dibujarOnda(ancho, dpr); dibujarRegiones(); dibujarTabla(); actualizarBotones();
+  }
+
+  function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+  function dibujarRegla(ancho, dpr) {
+    const cv = $("regla"); cv.width = ancho * dpr; cv.style.width = ancho + "px"; cv.style.height = "22px"; cv.height = 22 * dpr;
+    const g = cv.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, ancho, 22);
+    g.fillStyle = css("--tinta-suave"); g.font = "11px 'Atkinson Hyperlegible', sans-serif";
+    const paso = pps > 400 ? 0.1 : pps > 120 ? 0.5 : 1;
+    for (let t = 0; t <= dur() + 1e-9; t += paso) {
+      const x = Math.round(t * pps) + 0.5;
+      g.fillRect(x, 14, 1, 8);
+      g.fillText(t.toFixed(paso < 1 ? 1 : 0) + " s", x + 3, 11);
+    }
+  }
+
+  function dibujarOnda(ancho, dpr) {
+    const cv = $("onda"), alto = 120;
+    cv.width = ancho * dpr; cv.height = alto * dpr; cv.style.width = ancho + "px"; cv.style.height = alto + "px";
+    const g = cv.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, ancho, alto);
+    const medio = alto / 2;
+    g.fillStyle = css("--linea"); g.fillRect(0, medio, ancho, 1);
+    if (!muestras) return;
+    g.fillStyle = css("--onda");
+    const porPx = muestras.length / (duracion * pps);
+    let pico = 0; for (let i = 0; i < muestras.length; i += 50) pico = Math.max(pico, Math.abs(muestras[i]));
+    const escala = pico > 0 ? (medio - 4) / pico : 1;
+    for (let x = 0; x < Math.min(ancho, duracion * pps); x++) {
+      const a = Math.floor(x * porPx), b = Math.min(muestras.length, Math.floor((x + 1) * porPx) + 1);
+      let mn = 0, mx = 0;
+      for (let i = a; i < b; i++) { const v = muestras[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+      g.fillRect(x, medio - mx * escala, 1, Math.max(1, (mx - mn) * escala));
+    }
+  }
+
+  function dibujarRegiones() {
+    const pista = $("pista"); pista.innerHTML = "";
+    const lista = palabras();
+    const carriles = Math.max(1, ...lista.map((p) => p.carril + 1));
+    pista.style.height = carriles * ALTO_REGION + 6 + "px";
+    lista.forEach((p) => {
+      const d = document.createElement("div");
+      d.className = "region" + (p.id === selId ? " sel" : "") + (p.objetivo ? " objetivo" : "");
+      d.dataset.id = p.id; d.title = `${p.texto}  ${p.xmin.toFixed(3)}–${p.xmax.toFixed(3)} s`;
+      d.textContent = p.texto || "(sin texto)";
+      d.insertAdjacentHTML("beforeend", '<span class="asa i"></span><span class="asa d"></span>');
+      posicionar(d, p);
+      pista.appendChild(d);
+    });
+    actualizarMarco();
+  }
+
+  function posicionar(el, p) {
+    el.style.left = p.xmin * pps + "px";
+    el.style.width = Math.max(4, (p.xmax - p.xmin) * pps) + "px";
+    el.style.top = 3 + p.carril * ALTO_REGION + "px";
+  }
+
+  function actualizarMarco() {
+    const obj = palabras().find((p) => p.objetivo), m = $("marco");
+    m.hidden = !obj; if (!obj) return;
+    m.style.left = obj.xmin * pps + "px"; m.style.width = (obj.xmax - obj.xmin) * pps + "px";
+    m.style.height = $("lineaTiempo").offsetHeight + "px";
+  }
+
+  function dibujarTabla() {
+    const cuerpo = $("cuerpo"); cuerpo.innerHTML = "";
+    [...palabras()].sort((a, b) => a.xmin - b.xmin).forEach((p) => {
+      const tr = document.createElement("tr"); tr.dataset.id = p.id;
+      tr.className = (p.id === selId ? "sel " : "") + (p.objetivo ? "objetivo" : "");
+      tr.innerHTML = `
+        <td><input type="radio" name="obj" aria-label="Marcar como objetivo" ${p.objetivo ? "checked" : ""}></td>
+        <td><input type="text" data-c="texto" aria-label="Texto"></td>
+        <td><input type="number" step="0.001" min="0" data-c="xmin" aria-label="Inicio"></td>
+        <td><input type="number" step="0.001" min="0" data-c="xmax" aria-label="Fin"></td>
+        <td data-c="dur"></td>
+        <td class="fila"><button type="button" class="sec" data-a="oir">Escuchar</button><button type="button" class="sec" data-a="borrar">Quitar</button></td>`;
+      cuerpo.appendChild(tr); sincronizarFila(p);
+    });
+  }
+
+  function sincronizarFila(p) {
+    const tr = document.querySelector(`#cuerpo tr[data-id="${p.id}"]`); if (!tr) return;
+    const q = (c) => tr.querySelector(`[data-c="${c}"]`);
+    if (document.activeElement !== q("texto")) q("texto").value = p.texto;
+    if (document.activeElement !== q("xmin")) q("xmin").value = p.xmin.toFixed(3);
+    if (document.activeElement !== q("xmax")) q("xmax").value = p.xmax.toFixed(3);
+    q("dur").textContent = (p.xmax - p.xmin).toFixed(3);
+  }
+
+  function refrescarPalabra(p) {
+    const el = document.querySelector(`.region[data-id="${p.id}"]`);
+    if (el) { posicionar(el, p); el.title = `${p.texto}  ${p.xmin.toFixed(3)}–${p.xmax.toFixed(3)} s`; }
+    sincronizarFila(p); actualizarMarco();
+  }
+
+  function actualizarBotones() {
+    const hayFilas = filas.length > 0, hayAudio = duracion > 0;
+    $("btnPlaySel").disabled = !(hayAudio && selId);
+    $("btnPlayObj").disabled = !(hayAudio && palabras().some((p) => p.objetivo));
+    const hayOracion = !!archivoActual;
+    $("btnExportar").disabled = !(hayOracion && (palabras().length || hayFilas));
+    $("btnExportarTodo").disabled = !hayFilas;
+    $("btnNueva").disabled = !(hayOracion || hayAudio);
+    const s = porId(selId), t = audio.currentTime;
+    $("btnDividir").disabled = !(s && hayAudio);
+    $("btnExportarObj").disabled = !filas.some((f) => f.objetivo);
+  }
+
+  function seleccionar(id) {
+    selId = id;
+    document.querySelectorAll(".region").forEach((el) => el.classList.toggle("sel", +el.dataset.id === id));
+    document.querySelectorAll("#cuerpo tr").forEach((tr) => tr.classList.toggle("sel", +tr.dataset.id === id));
+    actualizarBotones();
+  }
+
+  function marcarObjetivo(id) {
+    palabras().forEach((p) => (p.objetivo = p.id === id));
+    dibujarRegiones(); dibujarTabla(); actualizarBotones();
+  }
+
+  // ---------- arrastre independiente ----------
+  let arrastre = null;
+  $("pista").addEventListener("pointerdown", (e) => {
+    const el = e.target.closest(".region"); if (!el) return;
+    const p = porId(+el.dataset.id); seleccionar(p.id);
+    const modo = e.target.classList.contains("i") ? "inicio" : e.target.classList.contains("d") ? "fin" : "mover";
+    arrastre = { p, modo, x0: e.clientX, a0: p.xmin, b0: p.xmax, movio: false };
+    el.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  $("pista").addEventListener("pointermove", (e) => {
+    if (!arrastre) return;
+    const { p, modo, x0, a0, b0 } = arrastre, dt = (e.clientX - x0) / pps, lim = dur();
+    if (Math.abs(e.clientX - x0) > 2) arrastre.movio = true;
+    if (modo === "mover") { const w = b0 - a0; p.xmin = Math.min(Math.max(0, a0 + dt), lim - w); p.xmax = p.xmin + w; }
+    else if (modo === "inicio") p.xmin = Math.min(Math.max(0, a0 + dt), p.xmax - MIN_DUR);
+    else p.xmax = Math.max(Math.min(lim, b0 + dt), p.xmin + MIN_DUR);
+    refrescarPalabra(p);
+  });
+  const soltar = () => { if (arrastre?.movio) { arrastre.p.modificado = true; dibujarTabla(); actualizarSelector(); } arrastre = null; };
+  $("pista").addEventListener("pointerup", soltar);
+  $("pista").addEventListener("pointercancel", soltar);
+  $("pista").addEventListener("dblclick", (e) => { const el = e.target.closest(".region"); if (el) oir(porId(+el.dataset.id)); });
+
+  // ---------- tabla ----------
+  $("cuerpo").addEventListener("input", (e) => {
+    const tr = e.target.closest("tr"); if (!tr) return;
+    const p = porId(+tr.dataset.id), c = e.target.dataset.c;
+    if (c === "texto") { p.texto = e.target.value; p.modificado = true; const el = document.querySelector(`.region[data-id="${p.id}"]`); if (el) el.firstChild.textContent = p.texto || "(sin texto)"; }
+    else if (c === "xmin" || c === "xmax") {
+      const v = parseFloat(e.target.value); if (!isFinite(v)) return;
+      if (c === "xmin" && v < p.xmax) p.xmin = Math.max(0, v);
+      if (c === "xmax" && v > p.xmin) p.xmax = Math.min(dur(), v);
+      p.modificado = true; refrescarPalabra(p);
+    }
+  });
+  $("cuerpo").addEventListener("change", (e) => {
+    const tr = e.target.closest("tr"); if (!tr) return;
+    if (e.target.type === "radio") marcarObjetivo(+tr.dataset.id);
+    else if (e.target.dataset.c === "xmin" || e.target.dataset.c === "xmax") { asignarCarriles(); dibujarRegiones(); dibujarTabla(); }
+  });
+  $("cuerpo").addEventListener("click", (e) => {
+    const tr = e.target.closest("tr"); if (!tr) return;
+    const p = porId(+tr.dataset.id); seleccionar(p.id);
+    if (e.target.dataset.a === "oir") oir(p);
+    if (e.target.dataset.a === "borrar") {
+      filas = filas.filter((f) => f.id !== p.id); selId = null; asignarCarriles(); dibujarTodo();
+      eliminadas.add(p.archivo); actualizarSelector();
+    }
+  });
+
+  // ---------- palabra objetivo ----------
+  $("btnObjetivo").addEventListener("click", () => {
+    const buscada = normalizar($("inObjetivo").value);
+    if (!buscada) return aviso("Escribe la palabra objetivo.", true);
+    const lista = palabras();
+    let p = lista.find((x) => normalizar(x.texto) === buscada);
+    if (p) { marcarObjetivo(p.id); seleccionar(p.id); return aviso(`"${p.texto}" enmarcada como palabra objetivo.`); }
+    p = lista.find((x) => normalizar(x.texto).includes(buscada));
+    if (p) {
+      marcarObjetivo(p.id); seleccionar(p.id);
+      return aviso(`No hay un intervalo que sea exactamente "${buscada}", pero "${p.texto}" la contiene. Recorta sus bordes y corrige el texto en la tabla.`);
+    }
+    aviso(`"${buscada}" no aparece en esta oración. Coloca el cabezal donde se escucha y usa "Agregar palabra aquí".`, true);
+  });
+
+  // ---------- reproducción ----------
+  function oir(p) {
+    if (!p || !duracion) return;
+    audio.currentTime = p.xmin; detenerEn = p.xmax; audio.play();
+  }
+  $("btnPlay").addEventListener("click", () => { detenerEn = null; audio.paused ? audio.play() : audio.pause(); });
+  $("btnPlaySel").addEventListener("click", () => oir(porId(selId)));
+  $("btnPlayObj").addEventListener("click", () => oir(palabras().find((p) => p.objetivo)));
+  audio.addEventListener("play", () => ($("btnPlay").textContent = "Pausar"));
+  audio.addEventListener("pause", () => ($("btnPlay").textContent = "Reproducir"));
+
+  $("onda").addEventListener("click", (e) => {
+    if (!duracion) return;
+    const r = $("onda").getBoundingClientRect();
+    audio.currentTime = Math.min(duracion, Math.max(0, (e.clientX - r.left) / pps)); detenerEn = null;
+  });
+
+  function nuevaPalabra(texto, xmin, xmax) {
+    if (!archivoActual) archivoActual = audioBase || "audio";
+    const p = { id: siguienteId++, archivo: archivoActual, xmin, xmax, texto, objetivo: false, modificado: true, carril: 0 };
+    filas.push(p); return p;
+  }
+
+  $("btnUsarCabezal").addEventListener("click", () => {
+    const t = audio.currentTime || 0;
+    $("nvInicio").value = t.toFixed(3); $("nvFin").value = Math.min(dur(), t + 0.3).toFixed(3);
+  });
+
+  $("formNueva").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const texto = $("nvTexto").value.trim(), a = num($("nvInicio").value), b = num($("nvFin").value);
+    if (!texto || !isFinite(a) || !isFinite(b)) return aviso("Escribe el texto, el inicio y el fin de la nueva palabra.", true);
+    if (b - a < MIN_DUR) return aviso("El fin debe ser mayor que el inicio.", true);
+    const p = nuevaPalabra(texto, Math.max(0, a), Math.min(dur() || b, b));
+    asignarCarriles(); selId = p.id; dibujarTodo(); actualizarSelector();
+    $("formNueva").reset();
+    aviso(`"${texto}" añadida. Si reemplaza una parte de otra fila, recorta o quita esa fila.`);
+  });
+
+  $("btnDividir").addEventListener("click", () => {
+    const p = porId(selId), t = audio.currentTime;
+    if (!p) return;
+    if (t <= p.xmin + MIN_DUR || t >= p.xmax - MIN_DUR)
+      return aviso(`Coloca el cabezal dentro de "${p.texto}" (entre ${p.xmin.toFixed(3)} y ${p.xmax.toFixed(3)} s), justo donde termina la primera palabra.`, true);
+    const derecha = nuevaPalabra("", t, p.xmax);
+    p.xmax = t; p.modificado = true; derecha.carril = p.carril;
+    selId = derecha.id; dibujarTodo(); actualizarSelector();
+    const campo = document.querySelector(`#cuerpo tr[data-id="${derecha.id}"] [data-c="texto"]`);
+    if (campo) campo.focus();
+    aviso(`"${p.texto}" dividida en dos. Escribe el texto de la segunda parte y corrige el de la primera.`);
+  });
+
+  function ciclo() {
+    const t = audio.currentTime;
+    if (detenerEn !== null && t >= detenerEn) { audio.pause(); detenerEn = null; }
+    $("tiempo").textContent = t.toFixed(3) + " s";
+    const c = $("cabezal"); c.hidden = !duracion; c.style.left = t * pps + "px";
+    const s = porId(selId); $("btnDividir").disabled = !(s && duracion && t > s.xmin + MIN_DUR && t < s.xmax - MIN_DUR);
+    requestAnimationFrame(ciclo);
+  }
+  requestAnimationFrame(ciclo);
+
+  // ---------- teclado ----------
+  document.addEventListener("keydown", (e) => {
+    if (e.target.matches("input, select, textarea")) return;
+    if (e.code === "Space") { e.preventDefault(); $("btnPlay").click(); }
+    else if (e.key === "Enter" && selId) { e.preventDefault(); oir(porId(selId)); }
+    else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && selId) {
+      e.preventDefault();
+      const p = porId(selId), d = e.key === "ArrowLeft" ? -0.01 : 0.01, lim = dur();
+      if (e.shiftKey) p.xmin = Math.min(Math.max(0, p.xmin + d), p.xmax - MIN_DUR);
+      else if (e.altKey) p.xmax = Math.max(Math.min(lim, p.xmax + d), p.xmin + MIN_DUR);
+      else { const w = p.xmax - p.xmin; p.xmin = Math.min(Math.max(0, p.xmin + d), lim - w); p.xmax = p.xmin + w; }
+      p.modificado = true; refrescarPalabra(p);
+    }
+  });
+
+  $("inZoom").addEventListener("input", () => {
+    const l = $("lienzo"), centro = (l.scrollLeft + l.clientWidth / 2) / pps;
+    dibujarTodo(); l.scrollLeft = centro * pps - l.clientWidth / 2;
+  });
+
+  // ---------- exportar ----------
+  function descargar(lista, sufijo) {
+    const enc = ["archivo", "xmin", "xmax", "duracion", "texto", "objetivo", "modificado"];
+    const orden = [...lista].sort((a, b) => (a.archivo > b.archivo ? 1 : a.archivo < b.archivo ? -1 : a.xmin - b.xmin));
+    const lineas = [enc.join(",")].concat(orden.map((f) =>
+      [f.archivo, r3(f.xmin), r3(f.xmax), r3(f.xmax - f.xmin), f.texto, f.objetivo, f.modificado].map(csvCampo).join(",")));
+    const blob = new Blob(["\uFEFF" + lineas.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `${sufijo}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    const cambios = lista.filter((f) => f.modificado).length;
+    aviso(`Descargado ${a.download}: ${lista.length} palabras, ${cambios} ajustadas a mano.`);
+  }
+  $("btnExportar").addEventListener("click", () => descargar(palabras(), `${archivoActual}_alineacion`));
+  $("btnExportarTodo").addEventListener("click", () => descargar(filas, `${nombreCsv}_corregido`));
+  $("btnExportarObj").addEventListener("click", () => descargar(filas.filter((f) => f.objetivo), `${nombreCsv}_objetivo`));
+
+  window.addEventListener("resize", () => { if (duracion || filas.length) dibujarTodo(); });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (duracion || filas.length) dibujarTodo(); });
+})();
+</script>
+</body>
+</html>
