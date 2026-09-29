@@ -21,6 +21,7 @@
   --onda: #2F7A68;
   --region: rgba(30, 92, 133, 0.16);
   --region-borde: #1E5C85;
+  --ambar: #9A6412;
   box-sizing: border-box;
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -29,7 +30,7 @@
   :root:not([data-theme="light"]) {
     --piedra: #142124; --papel: #1B2B2F; --tinta: #E4ECE9; --tinta-suave: #9DB2AD;
     --jade: #5FB59D; --jade-claro: #214239; --cenote: #6FA8D1; --grana: #E0708A;
-    --linea: #33474B; --onda: #5FB59D; --region: rgba(111, 168, 209, 0.18); --region-borde: #6FA8D1;
+    --linea: #33474B; --onda: #5FB59D; --region: rgba(111, 168, 209, 0.18); --region-borde: #6FA8D1; --ambar: #E0A84E;
   }
 }
 *, *::before, *::after { box-sizing: inherit; }
@@ -86,6 +87,22 @@ canvas { display: block; }
 .cabezal { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tinta); pointer-events: none; }
 .vacio { padding: 48px 16px; text-align: center; color: var(--tinta-suave); }
 
+.region.pendiente { border: 2px dashed var(--grana); background: rgba(168, 50, 74, 0.07); }
+.region.nota { border-color: var(--ambar); border-width: 2px; }
+.tokens { margin-top: 12px; }
+.tokens-cabeza { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; }
+.tokens-cabeza span { color: var(--tinta-suave); }
+.tokens-cabeza button { margin-left: auto; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-block; font: inherit; font-size: 0.9rem; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--linea); background: var(--piedra); color: var(--tinta); cursor: pointer; }
+.chip.ok { border-color: var(--jade); background: var(--jade-claro); }
+.chip.faltante { border: 1px dashed var(--grana); color: var(--grana); font-weight: 700; }
+.chip.fusion.faltante { border-color: var(--ambar); color: var(--ambar); }
+.chip.posicionada { border-color: var(--cenote); color: var(--cenote); font-weight: 700; }
+.leyenda { margin: 8px 0 0; font-size: 0.85rem; color: var(--tinta-suave); }
+.leyenda .chip { cursor: default; font-size: 0.8rem; }
+td small.nota { display: block; color: var(--ambar); font-size: 0.8rem; }
+td small.nota.pend { color: var(--grana); }
 .tabla-envoltura { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--linea); }
@@ -119,6 +136,10 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
         <label for="inCsv">CSV de palabras alineadas</label>
         <input id="inCsv" type="file" accept=".csv,text/csv">
       </div>
+      <div>
+        <label for="inTokens">Tokens de la oración (.txt)</label>
+        <input id="inTokens" type="file" accept=".txt,text/plain">
+      </div>
       <div id="cajaArchivo" hidden>
         <label for="selArchivo">Oración del CSV</label>
         <select id="selArchivo"></select>
@@ -131,7 +152,7 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
         </div>
       </div>
     </div>
-    <p id="estado" class="estado" role="status">Carga un audio y el CSV con sus palabras para empezar.</p>
+    <p id="estado" class="estado" role="status">Carga el audio y el CSV con sus palabras, o solo el audio y su .txt de tokens para una revisión individual.</p>
   </section>
 
   <section class="panel" aria-label="Editor">
@@ -155,6 +176,15 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
         <div class="cabezal" id="cabezal" hidden></div>
       </div>
       <div class="vacio" id="vacio">La forma de onda aparecerá aquí.</div>
+    </div>
+    <div id="panelTokens" class="tokens" hidden>
+      <div class="tokens-cabeza">
+        <strong>Tokens esperados</strong>
+        <span id="resumenTokens"></span>
+        <button id="btnRecomparar" type="button" class="sec">Volver a comparar</button>
+      </div>
+      <div id="listaTokens" class="chips" role="list"></div>
+      <p class="leyenda"><span class="chip ok">identificada</span> <span class="chip fusion faltante">estaba fusionada</span> <span class="chip faltante">sin posicionar</span> <span class="chip posicionada">posicionada a mano</span></p>
     </div>
     <p class="ayuda">
       Arrastra una palabra para moverla y sus bordes para ajustar inicio y fin. Doble clic la reproduce.
@@ -205,7 +235,10 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
   let detenerEn = null;
   let siguienteId = 1;
   let audioBase = null;
-  const eliminadas = new Set(); // oraciones donde se quitó alguna palabra
+  const eliminadas = new Set();
+  let tokensCargados = null;        // { base, lista, aplicadoA }
+  const tokensInfo = {};            // archivo -> [{ t, estado, id }]
+  const DUR_NUEVA = 0.25;           // duración inicial de una palabra añadida desde los tokens // oraciones donde se quitó alguna palabra
 
   // ---------- utilidades ----------
   const r3 = (x) => Math.round(x * 1000) / 1000;
@@ -253,6 +286,7 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
     const enc = datos[0].map((h) => normalizar(h).normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
     const col = (n) => enc.indexOf(n);
     const [cA, cI, cF, cT, cO] = [col("archivo"), col("xmin"), col("xmax"), col("texto"), col("objetivo")];
+    const [cOr, cP] = [col("origen"), col("pendiente")];
     if (cI < 0 || cF < 0 || cT < 0) return aviso("El CSV debe tener las columnas xmin, xmax y texto (archivo y duracion son opcionales).", true);
     filas = datos.slice(1).map((d) => ({
       id: siguienteId++,
@@ -260,17 +294,27 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
       xmin: num(d[cI]), xmax: num(d[cF]), texto: d[cT] ?? "",
       objetivo: cO >= 0 && /^(1|true|si|sí)$/i.test(String(d[cO]).trim()),
       modificado: false, carril: 0,
+      origen: cOr >= 0 && d[cOr] ? d[cOr] : "mfa",
+      pendiente: cP >= 0 && /^(1|true)$/i.test(String(d[cP]).trim()),
     })).filter((f) => isFinite(f.xmin) && isFinite(f.xmax));
-    const archivos = [...new Set(filas.map((f) => f.archivo))];
-    const sel = $("selArchivo"); sel.innerHTML = "";
-    archivos.forEach((a) => sel.add(new Option(a, a)));
-    actualizarSelector();
-    $("cajaArchivo").hidden = archivos.length < 2;
+    Object.keys(tokensInfo).forEach((k) => delete tokensInfo[k]);
+    const archivos = reconstruirSelector();
     elegirArchivo(audioBase && archivos.includes(audioBase) ? audioBase : archivos[0]);
     aviso(`${filas.length} palabras cargadas de ${archivos.length} oración(es).` + (duracion ? "" : " Falta el audio."));
+    if (tokensCargados) { tokensCargados.aplicadoA = null; aplicarTokens(); }
   });
 
   $("selArchivo").addEventListener("change", (e) => elegirArchivo(e.target.value));
+
+  function reconstruirSelector() {
+    const sel = $("selArchivo"), actual = sel.value;
+    const archivos = [...new Set(filas.map((f) => f.archivo))];
+    sel.innerHTML = ""; archivos.forEach((a) => sel.add(new Option(a, a)));
+    if (archivos.includes(actual)) sel.value = actual;
+    $("cajaArchivo").hidden = archivos.length < 2;
+    actualizarSelector();
+    return archivos;
+  }
 
   function actualizarSelector() {
     [...$("selArchivo").options].forEach((o) => {
@@ -311,6 +355,12 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
     const nombres = [...new Set(filas.map((f) => f.archivo))];
     if (nombres.includes(audioBase)) elegirArchivo(audioBase); else dibujarTodo();
     ["btnPlay", "btnUsarCabezal"].forEach((b) => ($(b).disabled = !duracion));
+    // Tokens de otra oración ya aplicados: quedan obsoletos para este audio
+    if (tokensCargados && tokensCargados.aplicadoA && tokensCargados.aplicadoA !== audioBase && tokensCargados.base !== audioBase) {
+      tokensCargados = null; $("inTokens").value = "";
+      if (!nombres.includes(audioBase)) aviso(`Audio listo: ${duracion.toFixed(2)} s. No está en el CSV: carga su .txt de tokens para revisarlo de forma individual.`);
+    }
+    aplicarTokens();
   });
 
   // ---------- carriles (para que las palabras que se traslapan no se tapen) ----------
@@ -334,7 +384,7 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
     pps = Math.min(+$("inZoom").value, 30000 / dpr / dur());
     const ancho = Math.ceil(dur() * pps);
     $("lineaTiempo").style.width = ancho + "px";
-    dibujarRegla(ancho, dpr); dibujarOnda(ancho, dpr); dibujarRegiones(); dibujarTabla(); actualizarBotones();
+    dibujarRegla(ancho, dpr); dibujarOnda(ancho, dpr); dibujarRegiones(); dibujarTabla(); dibujarTokens(); actualizarBotones();
   }
 
   function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
@@ -377,7 +427,8 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
     pista.style.height = carriles * ALTO_REGION + 6 + "px";
     lista.forEach((p) => {
       const d = document.createElement("div");
-      d.className = "region" + (p.id === selId ? " sel" : "") + (p.objetivo ? " objetivo" : "");
+      d.className = "region" + (p.id === selId ? " sel" : "") + (p.objetivo ? " objetivo" : "") +
+        (p.pendiente ? " pendiente" : "") + (p.nota && !p.pendiente ? " nota" : "");
       d.dataset.id = p.id; d.title = `${p.texto}  ${p.xmin.toFixed(3)}–${p.xmax.toFixed(3)} s`;
       d.textContent = p.texto || "(sin texto)";
       d.insertAdjacentHTML("beforeend", '<span class="asa i"></span><span class="asa d"></span>');
@@ -407,7 +458,7 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
       tr.className = (p.id === selId ? "sel " : "") + (p.objetivo ? "objetivo" : "");
       tr.innerHTML = `
         <td><input type="radio" name="obj" aria-label="Marcar como objetivo" ${p.objetivo ? "checked" : ""}></td>
-        <td><input type="text" data-c="texto" aria-label="Texto"></td>
+        <td><input type="text" data-c="texto" aria-label="Texto">${p.pendiente ? '<small class="nota pend">Sin posicionar: arrástrala a donde se escucha</small>' : p.nota ? `<small class="nota">${p.nota.replace(/</g, "&lt;")}</small>` : ""}</td>
         <td><input type="number" step="0.001" min="0" data-c="xmin" aria-label="Inicio"></td>
         <td><input type="number" step="0.001" min="0" data-c="xmax" aria-label="Fin"></td>
         <td data-c="dur"></td>
@@ -474,7 +525,10 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
     else p.xmax = Math.max(Math.min(lim, b0 + dt), p.xmin + MIN_DUR);
     refrescarPalabra(p);
   });
-  const soltar = () => { if (arrastre?.movio) { arrastre.p.modificado = true; dibujarTabla(); actualizarSelector(); } arrastre = null; };
+  const soltar = () => {
+    if (arrastre?.movio) { arrastre.p.modificado = true; arrastre.p.pendiente = false; dibujarRegiones(); dibujarTabla(); dibujarTokens(); actualizarSelector(); }
+    arrastre = null;
+  };
   $("pista").addEventListener("pointerup", soltar);
   $("pista").addEventListener("pointercancel", soltar);
   $("pista").addEventListener("dblclick", (e) => { const el = e.target.closest(".region"); if (el) oir(porId(+el.dataset.id)); });
@@ -488,13 +542,13 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
       const v = parseFloat(e.target.value); if (!isFinite(v)) return;
       if (c === "xmin" && v < p.xmax) p.xmin = Math.max(0, v);
       if (c === "xmax" && v > p.xmin) p.xmax = Math.min(dur(), v);
-      p.modificado = true; refrescarPalabra(p);
+      p.modificado = true; p.pendiente = false; refrescarPalabra(p);
     }
   });
   $("cuerpo").addEventListener("change", (e) => {
     const tr = e.target.closest("tr"); if (!tr) return;
     if (e.target.type === "radio") marcarObjetivo(+tr.dataset.id);
-    else if (e.target.dataset.c === "xmin" || e.target.dataset.c === "xmax") { asignarCarriles(); dibujarRegiones(); dibujarTabla(); }
+    else if (e.target.dataset.c === "xmin" || e.target.dataset.c === "xmax") { asignarCarriles(); dibujarRegiones(); dibujarTabla(); dibujarTokens(); }
   });
   $("cuerpo").addEventListener("click", (e) => {
     const tr = e.target.closest("tr"); if (!tr) return;
@@ -502,7 +556,7 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
     if (e.target.dataset.a === "oir") oir(p);
     if (e.target.dataset.a === "borrar") {
       filas = filas.filter((f) => f.id !== p.id); selId = null; asignarCarriles(); dibujarTodo();
-      eliminadas.add(p.archivo); actualizarSelector();
+      eliminadas.add(p.archivo); actualizarSelector(); dibujarTokens();
     }
   });
 
@@ -538,11 +592,167 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
     audio.currentTime = Math.min(duracion, Math.max(0, (e.clientX - r.left) / pps)); detenerEn = null;
   });
 
-  function nuevaPalabra(texto, xmin, xmax) {
+  function nuevaPalabra(texto, xmin, xmax, extra = {}) {
     if (!archivoActual) archivoActual = audioBase || "audio";
-    const p = { id: siguienteId++, archivo: archivoActual, xmin, xmax, texto, objetivo: false, modificado: true, carril: 0 };
+    const p = { id: siguienteId++, archivo: archivoActual, xmin, xmax, texto, objetivo: false, modificado: true,
+                carril: 0, origen: "manual", pendiente: false, ...extra };
     filas.push(p); return p;
   }
+
+  // ---------- tokens esperados (.txt) ----------
+  function limpiarToken(t) {
+    return normalizar(t).replace(/^[^\p{L}\p{N}]+/u, "").replace(/[^\p{L}\p{N}']+$/u, "");
+  }
+
+  function parsearTokens(texto) {
+    texto = texto.replace(/^\uFEFF/, "").trim();
+    if (texto.startsWith("[")) {   // lista de Python o JSON: ['chéen', "beyo'", ...]
+      const out = [], re = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/g; let m;
+      while ((m = re.exec(texto))) out.push((m[1] ?? m[2]).replace(/\\(.)/g, "$1"));
+      if (out.length) return out.map(limpiarToken).filter(Boolean);
+    }
+    return texto.split(/[\s,]+/).map(limpiarToken).filter(Boolean);   // un token por línea u oración en texto plano
+  }
+
+  const sinApos = (t) => normalizar(t).replace(/'/g, "");
+  const iguales = (a, b) => normalizar(a) === normalizar(b) || sinApos(a) === sinApos(b);
+
+  /* Alineamiento de secuencias entre los tokens esperados y las palabras del CSV (en orden temporal).
+     Operaciones: coincidencia 1 a 1, fusión (2 a 4 tokens en una sola palabra del CSV),
+     token faltante y palabra de más. */
+  function compararTokens(tokens, lista) {
+    const n = tokens.length, m = lista.length, INF = 1e9;
+    const dp = Array.from({ length: n + 1 }, () => new Float64Array(m + 1).fill(INF));
+    const de = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(null));
+    dp[0][0] = 0;
+    const relajar = (i, j, c, op) => { if (c < dp[i][j]) { dp[i][j] = c; de[i][j] = op; } };
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= m; j++) {
+      const c = dp[i][j]; if (c >= INF) continue;
+      if (i < n) relajar(i + 1, j, c + 1, { op: "T" });
+      if (j < m) relajar(i, j + 1, c + 1, { op: "W" });
+      if (i < n && j < m && iguales(tokens[i], lista[j].texto)) relajar(i + 1, j + 1, c, { op: "M" });
+      for (let k = 2; k <= 4 && i + k <= n && j < m; k++)
+        if (iguales(tokens.slice(i, i + k).join(""), lista[j].texto.replace(/[\s-]/g, ""))) relajar(i + k, j + 1, c + 0.01, { op: "F", k });
+    }
+    const tok = new Array(n), pal = new Map();
+    let i = n, j = m;
+    while (i > 0 || j > 0) {
+      const d = de[i][j];
+      if (d.op === "M") { tok[i - 1] = { estado: "ok", id: lista[j - 1].id }; pal.set(lista[j - 1].id, { tipo: "ok" }); i--; j--; }
+      else if (d.op === "F") {
+        const partes = tokens.slice(i - d.k, i);
+        for (let x = i - d.k; x < i; x++) tok[x] = { estado: "fusion", fusionId: lista[j - 1].id };
+        pal.set(lista[j - 1].id, { tipo: "fusion", partes }); i -= d.k; j--;
+      } else if (d.op === "T") { tok[i - 1] = { estado: "faltante" }; i--; }
+      else { pal.set(lista[j - 1].id, { tipo: "extra" }); j--; }
+    }
+    return { tok, pal };
+  }
+
+  $("inTokens").addEventListener("change", async (e) => {
+    const archivo = e.target.files[0]; if (!archivo) return;
+    const lista = parsearTokens(await archivo.text());
+    if (!lista.length) return aviso("El .txt no contiene tokens.", true);
+    tokensCargados = { base: baseNombre(archivo.name), lista, aplicadoA: null };
+    aplicarTokens(true);
+  });
+  $("btnRecomparar").addEventListener("click", () => aplicarTokens(true));
+
+  function aplicarTokens(forzar = false) {
+    if (!tokensCargados) return;
+    const arch = audioBase || tokensCargados.base;
+    if (!forzar && tokensCargados.aplicadoA === arch) return;
+    const tokens = tokensCargados.lista;
+    const aclaracion = audioBase && tokensCargados.base !== audioBase
+      ? ` (El .txt "${tokensCargados.base}" se emparejó con el audio "${audioBase}".)` : "";
+
+    // Quitar lo añadido en una comparación anterior que todavía no se posicionó
+    filas = filas.filter((f) => !(f.archivo === arch && f.origen === "tokens" && f.pendiente));
+    filas.filter((f) => f.archivo === arch).forEach((f) => delete f.nota);
+    const lista = filas.filter((f) => f.archivo === arch).sort((a, b) => a.xmin - b.xmin);
+    archivoActual = arch;
+
+    if (!lista.length) {
+      // Revisión individual: la oración no está en el CSV
+      if (!duracion) return aviso(`Tokens cargados (${tokens.length}). Carga el audio de la oración para distribuirlos.`);
+      const pesos = tokens.map((t) => Math.max(1, t.replace(/'/g, "").length));
+      const total = pesos.reduce((a, b) => a + b, 0);
+      let t0 = 0;
+      tokensInfo[arch] = tokens.map((t, k) => {
+        const ancho = (duracion * pesos[k]) / total;
+        const p = nuevaPalabra(t, t0, Math.max(t0 + MIN_DUR, t0 + ancho * 0.9), { origen: "tokens", pendiente: true });
+        t0 += ancho;
+        return { t, estado: "faltante", id: p.id };
+      });
+      tokensCargados.aplicadoA = arch;
+      reconstruirSelector(); asignarCarriles(); elegirArchivo(arch);
+      return aviso(`Revisión individual: ${tokens.length} tokens repartidos a lo largo del audio como punto de partida. Ajusta cada uno a donde se escucha.` + aclaracion);
+    }
+
+    // Comparación con las palabras del CSV
+    const { tok, pal } = compararTokens(tokens, lista);
+    const nF = tok.filter((x) => x.estado === "fusion").length, nX = tok.filter((x) => x.estado === "faltante").length;
+    // Antes de añadir un token, reutilizar una palabra existente con el mismo texto que quedó sin emparejar
+    // (p. ej. una palabra que ya se posicionó a mano), para no duplicarla al volver a comparar.
+    const libres = lista.filter((p) => pal.get(p.id)?.tipo === "extra");
+    tok.forEach((x, idx) => {
+      if (x.estado === "ok") return;
+      const k2 = libres.findIndex((p) => iguales(p.texto, tokens[idx]));
+      if (k2 < 0) return;
+      const p = libres.splice(k2, 1)[0];
+      pal.set(p.id, { tipo: "reuso" });
+      Object.assign(x, { reusoId: p.id, estado: p.origen === "mfa" ? "ok" : x.estado });
+    });
+    pal.forEach((v, id) => {
+      const p = porId(id);
+      if (v.tipo === "fusion") p.nota = `Fusionada: contiene ${v.partes.join(" + ")}. Recórtala o quítala al posicionar las separadas.`;
+      if (v.tipo === "extra") p.nota = "No está en los tokens esperados.";
+    });
+    const finActual = Math.max(0, ...lista.map((p) => p.xmax));
+    const limite = Math.max(duracion, finActual);
+    let k = 0;
+    tokensInfo[arch] = tok.map((x, idx) => {
+      if (x.reusoId) return { t: tokens[idx], estado: x.estado, id: x.reusoId };
+      if (x.estado === "ok") return { t: tokens[idx], estado: "ok", id: x.id };
+      const ini = Math.max(0, Math.min(finActual + k * DUR_NUEVA, limite - DUR_NUEVA)); k++;
+      const p = nuevaPalabra(tokens[idx], ini, Math.max(ini + MIN_DUR, Math.min(limite, ini + DUR_NUEVA)), { origen: "tokens", pendiente: true });
+      return { t: tokens[idx], estado: x.estado, id: p.id };
+    });
+    tokensCargados.aplicadoA = arch;
+
+    const nExtra = [...pal.values()].filter((v) => v.tipo === "extra").length;
+    reconstruirSelector(); asignarCarriles(); elegirArchivo(arch);
+    aviso((k
+      ? `${tokens.length} tokens: ${tokens.length - nF - nX} identificados por el alineador, ${nF} estaban fusionados y ${nX} no aparecían. Se añadieron ${k} palabras al final; arrástralas a donde se escuchan.` +
+        (nExtra ? ` Hay ${nExtra} palabra(s) del CSV que no están en los tokens.` : "")
+      : `Los ${tokens.length} tokens coinciden con las palabras del CSV. No hay nada que añadir.`) + aclaracion);
+  }
+
+  function dibujarTokens() {
+    const info = tokensInfo[archivoActual], panel = $("panelTokens");
+    panel.hidden = !info; if (!info) return;
+    const cont = $("listaTokens"); cont.innerHTML = "";
+    let listos = 0;
+    info.forEach((x) => {
+      const p = porId(x.id);
+      let clase = "ok", titulo = "Identificada por el alineador";
+      if (x.estado !== "ok") {
+        if (!p) { clase = "faltante"; titulo = "Se quitó; pulsa Volver a comparar para añadirla de nuevo"; }
+        else if (p.pendiente) { clase = x.estado === "fusion" ? "fusion faltante" : "faltante"; titulo = x.estado === "fusion" ? "Estaba fusionada con otra palabra; falta posicionarla" : "No aparecía en el CSV; falta posicionarla"; }
+        else { clase = "posicionada"; titulo = "Posicionada a mano"; }
+      }
+      if (clase === "ok" || clase === "posicionada") listos++;
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "chip " + clase; b.textContent = x.t; b.title = titulo; b.setAttribute("role", "listitem");
+      if (p) b.addEventListener("click", () => {
+        seleccionar(p.id);
+        const l = $("lienzo"); l.scrollLeft = p.xmin * pps - l.clientWidth / 3;
+      });
+      cont.appendChild(b);
+    });
+    $("resumenTokens").textContent = `${listos} de ${info.length} listos`;
+  }
+
 
   $("btnUsarCabezal").addEventListener("click", () => {
     const t = audio.currentTime || 0;
@@ -597,7 +807,8 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
       if (e.shiftKey) p.xmin = Math.min(Math.max(0, p.xmin + d), p.xmax - MIN_DUR);
       else if (e.altKey) p.xmax = Math.max(Math.min(lim, p.xmax + d), p.xmin + MIN_DUR);
       else { const w = p.xmax - p.xmin; p.xmin = Math.min(Math.max(0, p.xmin + d), lim - w); p.xmax = p.xmin + w; }
-      p.modificado = true; refrescarPalabra(p);
+      const eraPendiente = p.pendiente; p.modificado = true; p.pendiente = false; refrescarPalabra(p);
+      if (eraPendiente) { dibujarRegiones(); dibujarTabla(); dibujarTokens(); }
     }
   });
 
@@ -608,16 +819,18 @@ kbd { font-family: inherit; border: 1px solid var(--linea); border-bottom-width:
 
   // ---------- exportar ----------
   function descargar(lista, sufijo) {
-    const enc = ["archivo", "xmin", "xmax", "duracion", "texto", "objetivo", "modificado"];
+    const enc = ["archivo", "xmin", "xmax", "duracion", "texto", "objetivo", "modificado", "origen", "pendiente"];
     const orden = [...lista].sort((a, b) => (a.archivo > b.archivo ? 1 : a.archivo < b.archivo ? -1 : a.xmin - b.xmin));
     const lineas = [enc.join(",")].concat(orden.map((f) =>
-      [f.archivo, r3(f.xmin), r3(f.xmax), r3(f.xmax - f.xmin), f.texto, f.objetivo, f.modificado].map(csvCampo).join(",")));
+      [f.archivo, r3(f.xmin), r3(f.xmax), r3(f.xmax - f.xmin), f.texto, f.objetivo, f.modificado, f.origen || "mfa", !!f.pendiente].map(csvCampo).join(",")));
     const blob = new Blob(["\uFEFF" + lineas.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = `${sufijo}.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     const cambios = lista.filter((f) => f.modificado).length;
-    aviso(`Descargado ${a.download}: ${lista.length} palabras, ${cambios} ajustadas a mano.`);
+    const pend = lista.filter((f) => f.pendiente).length;
+    aviso(`Descargado ${a.download}: ${lista.length} palabras, ${cambios} ajustadas a mano.` +
+          (pend ? ` Ojo: ${pend} siguen sin posicionar (columna pendiente = true).` : ""), pend > 0);
   }
   $("btnExportar").addEventListener("click", () => descargar(palabras(), `${archivoActual}_alineacion`));
   $("btnExportarTodo").addEventListener("click", () => descargar(filas, `${nombreCsv}_corregido`));
